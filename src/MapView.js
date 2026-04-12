@@ -16,13 +16,15 @@ function MapView({ user }) {
   const [wallet, setWallet] = useState(0);
   const [lastToll, setLastToll] = useState(0);
   const [showToll, setShowToll] = useState(false);
-  const [enteredZone, setEnteredZone] = useState(false);
   const [isTripActive, setIsTripActive] = useState(false);
   const [tripToll, setTripToll] = useState(0);
   const [showSummary, setShowSummary] = useState(false);
-  
+
+  const [visitedTolls, setVisitedTolls] = useState([]); // ⭐ NEW
+
   const db = getDatabase();
 
+  /* 📡 Wallet sync */
   useEffect(() => {
     onValue(ref(db, `users/${user.uid}`), (snap) => {
       const data = snap.val();
@@ -30,6 +32,7 @@ function MapView({ user }) {
     });
   }, []);
 
+  /* 📍 GPS */
   async function getLocation() {
     try {
       const res = await fetch("https://api.thingspeak.com/channels/3303169/feeds.json?results=1");
@@ -37,7 +40,9 @@ function MapView({ user }) {
       const lat = parseFloat(data.feeds[0].field1);
       const lng = parseFloat(data.feeds[0].field2);
       if (!isNaN(lat) && !isNaN(lng)) setPosition([lat, lng]);
-    } catch (err) { console.log("GPS Error", err); }
+    } catch (err) {
+      console.log("GPS Error", err);
+    }
   }
 
   useEffect(() => {
@@ -45,46 +50,87 @@ function MapView({ user }) {
     return () => clearInterval(interval);
   }, []);
 
+  /* 📐 Distance calc */
   function calcDistance(p1, p2) {
     const R = 6371;
     const dLat = (p2[0] - p1[0]) * (Math.PI / 180);
     const dLon = (p2[1] - p1[1]) * (Math.PI / 180);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(p1[0] * (Math.PI / 180)) * Math.cos(p2[0] * (Math.PI / 180)) * Math.sin(dLon / 2) ** 2;
+
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(p1[0] * (Math.PI / 180)) *
+        Math.cos(p2[0] * (Math.PI / 180)) *
+        Math.sin(dLon / 2) ** 2;
+
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  const tollZone = [17.385, 78.486];
-  const isInsideZone = (pos) => calcDistance(pos, tollZone) <= 0.1;
+  /* 🧱 MULTIPLE TOLL ZONES (YOUR COORDINATES) */
+  const tollZones = [
+    { id: 1, pos: [17.282067, 78.53985] },
+    { id: 2, pos: [17.281065, 78.539783] },
+    { id: 3, pos: [17.281692, 78.539665] },
+  ];
 
+  const GEOFENCE_RADIUS = 0.1; // km (100m)
+
+  /* 🚗 MAIN LOGIC */
   useEffect(() => {
     if (!isTripActive) return;
-    if (!prevPos) { setPrevPos(position); return; }
+
+    if (!prevPos) {
+      setPrevPos(position);
+      return;
+    }
 
     const d = calcDistance(prevPos, position);
+
     if (d > 0) {
       const newDist = distance + d;
       setDistance(newDist);
 
-      // Distance Toll (₹1 per 1km)
+      /* 💸 Distance Toll (₹1 per km) */
       if (newDist - lastToll >= 1) {
         const cost = 1;
+
         set(ref(db, `users/${user.uid}/wallet`), wallet - cost);
-        push(ref(db, `users/${user.uid}/history`), { type: "distance", amount: cost, time: new Date().toLocaleString() });
-        setTripToll(t => t + cost);
+
+        push(ref(db, `users/${user.uid}/history`), {
+          type: "distance",
+          amount: cost,
+          time: new Date().toLocaleString(),
+        });
+
+        setTripToll((t) => t + cost);
         setLastToll(newDist);
         setShowToll(true);
-        setTimeout(() => setShowToll(false), 3000);
+        setTimeout(() => setShowToll(false), 2000);
       }
     }
 
-    // Geofence Toll (₹10)
-    if (isInsideZone(position) && !enteredZone) {
-      const cost = 10;
-      set(ref(db, `users/${user.uid}/wallet`), wallet - cost);
-      push(ref(db, `users/${user.uid}/history`), { type: "geofence", amount: cost, time: new Date().toLocaleString() });
-      setTripToll(t => t + cost);
-      setEnteredZone(true);
-    }
+    /* 🧱 Geofencing Toll (₹10 per zone) */
+    tollZones.forEach((zone) => {
+      const dist = calcDistance(position, zone.pos);
+
+      if (dist <= GEOFENCE_RADIUS && !visitedTolls.includes(zone.id)) {
+        const cost = 10;
+
+        set(ref(db, `users/${user.uid}/wallet`), wallet - cost);
+
+        push(ref(db, `users/${user.uid}/history`), {
+          type: "geofence",
+          amount: cost,
+          time: new Date().toLocaleString(),
+        });
+
+        setTripToll((t) => t + cost);
+        setVisitedTolls((prev) => [...prev, zone.id]);
+
+        setShowToll(true);
+        setTimeout(() => setShowToll(false), 2000);
+      }
+    });
+
     setPrevPos(position);
   }, [position]);
 
@@ -97,16 +143,29 @@ function MapView({ user }) {
 
       <div style={controlBox}>
         {!isTripActive ? (
-          <button onClick={() => {
-            setIsTripActive(true);
-            setDistance(0);
-            setLastToll(0);
-            setTripToll(0);
-            setEnteredZone(false);
-            setPrevPos(position);
-          }} style={btnStyle}>▶ Start Trip</button>
+          <button
+            onClick={() => {
+              setIsTripActive(true);
+              setDistance(0);
+              setLastToll(0);
+              setTripToll(0);
+              setVisitedTolls([]); // ⭐ reset
+              setPrevPos(position);
+            }}
+            style={btnStyle}
+          >
+            ▶ Start Trip
+          </button>
         ) : (
-          <button onClick={() => { setIsTripActive(false); setShowSummary(true); }} style={{ ...btnStyle, background: "#ef4444" }}>⏹ Stop Trip</button>
+          <button
+            onClick={() => {
+              setIsTripActive(false);
+              setShowSummary(true);
+            }}
+            style={{ ...btnStyle, background: "#ef4444" }}
+          >
+            ⏹ Stop Trip
+          </button>
         )}
       </div>
 
@@ -117,23 +176,76 @@ function MapView({ user }) {
           <h3>Trip Summary</h3>
           <p>Distance: {distance.toFixed(2)} km</p>
           <p>Total Toll: ₹{tripToll}</p>
-          <button onClick={() => setShowSummary(false)} style={btnStyle}>OK</button>
+          <button onClick={() => setShowSummary(false)} style={btnStyle}>
+            OK
+          </button>
         </div>
       )}
 
       <MapContainer center={position} zoom={15} style={{ height: "90vh", width: "100%" }}>
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         <Marker position={position} icon={vehicleIcon} />
-        <Circle center={tollZone} radius={100} pathOptions={{ color: "red" }} />
+
+        {/* 🔴 Draw ALL toll zones */}
+        {tollZones.map((zone) => (
+          <Circle
+            key={zone.id}
+            center={zone.pos}
+            radius={100}
+            pathOptions={{ color: "red" }}
+          />
+        ))}
       </MapContainer>
     </>
   );
 }
 
-const infoBox = { position: "absolute", top: 10, left: 10, background: "white", padding: "10px", zIndex: 1000, borderRadius: "10px", color: "black" };
-const controlBox = { position: "absolute", top: 100, left: 10, zIndex: 1000 };
-const popup = { position: "absolute", top: 70, left: "50%", transform: "translateX(-50%)", background: "green", color: "white", padding: "10px", borderRadius: "10px", zIndex: 2000 };
-const summaryBox = { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", background: "white", padding: "30px", borderRadius: "15px", zIndex: 3000, textAlign: "center", color: "black", boxShadow: "0 0 20px rgba(0,0,0,0.5)" };
-const btnStyle = { padding: "10px 20px", borderRadius: "10px", border: "none", background: "#22c55e", color: "white", fontWeight: "bold", cursor: "pointer" };
+const infoBox = {
+  position: "absolute",
+  top: 10,
+  left: 10,
+  background: "white",
+  padding: "10px",
+  zIndex: 1000,
+  borderRadius: "10px",
+  color: "black",
+};
 
-export default MapView;
+const controlBox = { position: "absolute", top: 100, left: 10, zIndex: 1000 };
+
+const popup = {
+  position: "absolute",
+  top: 70,
+  left: "50%",
+  transform: "translateX(-50%)",
+  background: "green",
+  color: "white",
+  padding: "10px",
+  borderRadius: "10px",
+  zIndex: 2000,
+};
+
+const summaryBox = {
+  position: "absolute",
+  top: "50%",
+  left: "50%",
+  transform: "translate(-50%, -50%)",
+  background: "white",
+  padding: "30px",
+  borderRadius: "15px",
+  zIndex: 3000,
+  textAlign: "center",
+  color: "black",
+};
+
+const btnStyle = {
+  padding: "10px 20px",
+  borderRadius: "10px",
+  border: "none",
+  background: "#22c55e",
+  color: "white",
+  fontWeight: "bold",
+  cursor: "pointer",
+};
+
+export default MapView; 
