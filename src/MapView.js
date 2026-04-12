@@ -13,6 +13,8 @@ L.Icon.Default.mergeOptions({
 });
 
 function MapView({ user }) {
+
+  /* ✅ ALL HOOKS FIRST */
   const [position, setPosition] = useState([17.282, 78.536]);
   const [prevPos, setPrevPos] = useState(null);
   const [distance, setDistance] = useState(0);
@@ -28,6 +30,7 @@ function MapView({ user }) {
     if (!user || !user.uid) return;
 
     const userRef = ref(db, `users/${user.uid}`);
+
     const unsub = onValue(userRef, (snap) => {
       const data = snap.val();
       if (data) setWallet(data.wallet || 0);
@@ -42,12 +45,14 @@ function MapView({ user }) {
       const res = await fetch("https://api.thingspeak.com/channels/3303169/feeds.json?results=1");
       const data = await res.json();
 
-      if (!data.feeds || !data.feeds.length) return;
+      if (!data.feeds || !data.feeds[0]) return;
 
       const lat = parseFloat(data.feeds[0].field1);
       const lng = parseFloat(data.feeds[0].field2);
 
-      if (!isNaN(lat) && !isNaN(lng)) setPosition([lat, lng]);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        setPosition([lat, lng]);
+      }
     } catch (e) {
       console.log("GPS error", e);
     }
@@ -77,10 +82,10 @@ function MapView({ user }) {
   const tollZones = [
     { id: 1, pos: [17.282067, 78.53985] },
     { id: 2, pos: [17.281065, 78.539783] },
-    { id: 3, pos: [17.281692, 78.539665] },
+    { id: 3, pos: [17.281107, 78.538080] },
   ];
 
-  const RADIUS = 0.01;
+  const RADIUS = 0.02; // 20 meters
 
   /* 🚗 Main Logic */
   useEffect(() => {
@@ -92,7 +97,7 @@ function MapView({ user }) {
     }
 
     const d = calcDistance(prevPos, position);
-    const newDist = distance + d;
+    const newDist = (distance || 0) + d;
     setDistance(newDist);
 
     /* 💸 Distance Toll */
@@ -132,18 +137,34 @@ function MapView({ user }) {
     setPrevPos(position);
   }, [position, user, isTripActive]);
 
+  /* ✅ SAFE UI RENDER */
   return (
     <>
-      <button onClick={() => setIsTripActive(true)}>Start Trip</button>
+      {!user ? (
+        <h2 style={{ color: "white" }}>Loading user...</h2>
+      ) : (
+        <>
+          <button onClick={() => setIsTripActive(true)}>Start Trip</button>
 
-      <MapContainer center={position} zoom={15} style={{ height: "100vh", width: "100%" }}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        <Marker position={position} />
+          <MapContainer
+            center={position || [17.282, 78.536]}
+            zoom={15}
+            style={{ height: "100vh", width: "100%" }}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <Marker position={position} />
 
-        {tollZones.map((z) => (
-          <Circle key={z.id} center={z.pos} radius={10} pathOptions={{ color: "red" }} />
-        ))}
-      </MapContainer>
+            {tollZones.map((z) => (
+              <Circle
+                key={z.id}
+                center={z.pos}
+                radius={20}
+                pathOptions={{ color: "red" }}
+              />
+            ))}
+          </MapContainer>
+        </>
+      )}
     </>
   );
 }
