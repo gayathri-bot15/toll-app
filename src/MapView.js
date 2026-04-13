@@ -14,7 +14,10 @@ L.Icon.Default.mergeOptions({
 
 function MapView({ user }) {
 
-  /* ✅ ALL HOOKS FIRST */
+  /* ✅ Hydration fix */
+  const [isClient, setIsClient] = useState(false);
+
+  /* ✅ States */
   const [position, setPosition] = useState([17.282, 78.536]);
   const [prevPos, setPrevPos] = useState(null);
   const [distance, setDistance] = useState(0);
@@ -24,6 +27,11 @@ function MapView({ user }) {
   const [isTripActive, setIsTripActive] = useState(false);
 
   const db = getDatabase();
+
+  /* 🔥 Ensure client render */
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   /* 🔐 Wallet Sync */
   useEffect(() => {
@@ -80,9 +88,9 @@ function MapView({ user }) {
 
   /* 🧱 Toll Zones */
   const tollZones = [
-    { id: 1, pos: [17.282067, 78.53985] },
-    { id: 2, pos: [17.281065, 78.539783] },
-    { id: 3, pos: [17.281107, 78.538080] },
+    { id: 1, pos: [17.282067, 78.539850] },
+    { id: 2, pos: [17.281125, 78.538030] },
+    { id: 3, pos: [17.281048, 78.539672] },
   ];
 
   const RADIUS = 0.02; // 20 meters
@@ -109,7 +117,7 @@ function MapView({ user }) {
       push(ref(db, `users/${user.uid}/history`), {
         type: "distance",
         amount: cost,
-        time: new Date().toLocaleString(),
+        time: new Date().toISOString(),
       });
 
       setLastToll(newDist);
@@ -127,7 +135,7 @@ function MapView({ user }) {
         push(ref(db, `users/${user.uid}/history`), {
           type: "geofence",
           amount: cost,
-          time: new Date().toLocaleString(),
+          time: new Date().toISOString(),
         });
 
         setVisitedTolls((prev) => [...prev, zone.id]);
@@ -137,7 +145,12 @@ function MapView({ user }) {
     setPrevPos(position);
   }, [position, user, isTripActive]);
 
-  /* ✅ SAFE UI RENDER */
+  /* 🚫 Hydration protection */
+  if (!isClient) {
+    return <h2 style={{ color: "white" }}>Loading...</h2>;
+  }
+
+  /* 🎯 UI */
   return (
     <>
       {!user ? (
@@ -147,20 +160,28 @@ function MapView({ user }) {
           <button onClick={() => setIsTripActive(true)}>Start Trip</button>
 
           <MapContainer
-            center={position || [17.282, 78.536]}
-            zoom={15}
+            center={position || tollZones[0].pos}
+            zoom={16}
             style={{ height: "100vh", width: "100%" }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
             <Marker position={position} />
 
             {tollZones.map((z) => (
-              <Circle
-                key={z.id}
-                center={z.pos}
-                radius={20}
-                pathOptions={{ color: "red" }}
-              />
+              <>
+                
+                <Circle
+                  key={z.id}
+                  center={z.pos}
+                  radius={20}
+                  pathOptions={{
+                    color: "red",
+                    fillColor: "red",
+                    fillOpacity: 0.4,
+                  }}
+                />
+              </>
             ))}
           </MapContainer>
         </>
