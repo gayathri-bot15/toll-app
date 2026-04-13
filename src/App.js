@@ -35,6 +35,13 @@ function App() {
     });
     return () => unsub();
   }, []);
+  useEffect(() => {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(reg => reg.unregister());
+    });
+  }
+}, []);
 
   /* 📡 USER DATA LISTENER (FIXED) */
   useEffect(() => {
