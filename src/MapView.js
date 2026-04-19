@@ -2,7 +2,7 @@ import { MapContainer, TileLayer, Marker, Circle, Polyline } from "react-leaflet
 import "leaflet/dist/leaflet.css";
 import { useState, useEffect, useRef } from "react";
 import L from "leaflet";
-import { getDatabase, ref, push, onValue, runTransaction } from "firebase/database";
+import { getDatabase, ref, onValue } from "firebase/database";
 
 /* Leaflet Fix */
 delete L.Icon.Default.prototype._getIconUrl;
@@ -13,10 +13,9 @@ L.Icon.Default.mergeOptions({
 });
 
 function MapView({ user }) {
-
   const [position, setPosition] = useState([17.282, 78.536]);
   const [path, setPath] = useState([]);
-  //const [wallet, setWallet] = useState(0);
+  const [wallet, setWallet] = useState(0); // Fixed: Uncommented this
   const [buzzer, setBuzzer] = useState(0);
 
   const mapRef = useRef();
@@ -27,28 +26,31 @@ function MapView({ user }) {
   useEffect(() => {
     const gpsRef = ref(db, `gps/${vehicleID}`);
 
-    return onValue(gpsRef, (snap) => {
+    const unsubscribe = onValue(gpsRef, (snap) => {
       const data = snap.val();
       if (data && data.lat && data.lng) {
         const newPos = [data.lat, data.lng];
-
         setPosition(newPos);
         setPath((prev) => [...prev, newPos]);
         setBuzzer(data.buzzer || 0);
       }
     });
-  }, []);
+
+    return () => unsubscribe();
+  }, [db]); // Added 'db' dependency
 
   /* 💰 Wallet */
   useEffect(() => {
     if (!user) return;
 
     const userRef = ref(db, `users/${user.uid}`);
-    return onValue(userRef, (snap) => {
+    const unsubscribe = onValue(userRef, (snap) => {
       const data = snap.val();
       if (data) setWallet(data.wallet);
     });
-  }, [user]);
+
+    return () => unsubscribe();
+  }, [user, db]); // Added 'db' dependency
 
   /* 📍 Smooth move */
   useEffect(() => {
@@ -66,7 +68,7 @@ function MapView({ user }) {
 
   return (
     <>
-      <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, background: "white", padding: 10 }}>
+      <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, background: "white", padding: 10, borderRadius: "5px", boxShadow: "0 2px 5px rgba(0,0,0,0.2)" }}>
         💰 ₹{wallet}
       </div>
 
@@ -75,10 +77,13 @@ function MapView({ user }) {
         <div style={{
           position: "absolute",
           bottom: 20,
-          left: 20,
+          left: "50%",
+          transform: "translateX(-50%)",
           background: "red",
           color: "white",
-          padding: 10,
+          padding: "10px 20px",
+          borderRadius: "8px",
+          fontWeight: "bold",
           zIndex: 1000
         }}>
           🚨 Toll Detected!
@@ -89,7 +94,7 @@ function MapView({ user }) {
         center={position}
         zoom={16}
         style={{ height: "100vh", width: "100%" }}
-        whenCreated={(map) => (mapRef.current = map)}
+        ref={mapRef} // Updated to standard ref usage
       >
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
@@ -97,7 +102,7 @@ function MapView({ user }) {
         <Marker position={position} />
 
         {/* 🟢 Path */}
-        <Polyline positions={path} />
+        <Polyline positions={path} color="blue" />
 
         {/* 🔴 Toll zones */}
         {tollZones.map((z) => (
