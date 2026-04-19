@@ -16,7 +16,7 @@ function MapView({ user }) {
 
   const [position, setPosition] = useState([17.282, 78.536]);
   const [path, setPath] = useState([]);
-  const [wallet, setWallet] = useState(0);
+  //const [wallet, setWallet] = useState(0);
   const [buzzer, setBuzzer] = useState(0);
 
   const mapRef = useRef();
